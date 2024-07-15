@@ -1,7 +1,7 @@
 import express from "express";
 import http from "http";
 import { WebSocketServer, WebSocket } from "ws";
-import { v4 as uuidv4 } from "uuid";
+import { v4 as uuidv4 } from "https://deno.land/std/uuid/mod.ts";
 
 // copy pasted from the stockfish repo
 // issue: <github_link>
