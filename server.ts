@@ -1,68 +1,52 @@
 import express from "express";
+import http from "http";
+import { WebSocketServer, WebSocket } from "ws";
+import { v4 as uuidv4 } from 'uuid';
 
+// copy pasted from the stockfish repo
+// issue: <github_link>
 const loadEngine = require("./load_engine.js");
-// import stockfish from "stockfish";
+
 
 const app = express();
 const port = 8080;
 
+const server = http.createServer(app);
+const wss = new WebSocketServer({ noServer: true });
+
+// queue[0] = white, queue[1] = black
+const queue: [string[], string[]] = [[], []];
+const wsMap = new Map<string, WebSocket>();
+const connectionMap = new Map<string, string>();
+
+// apparently the only way to load the engine in node right now?
 const engine = loadEngine(require("path").join(__dirname, "node_modules/stockfish/src/stockfish-nnue-16.js"));
-// console.log(engine);
+
 const fenregex = /^([rnbqkpRNBQKP1-8]+\/){7}([rnbqkpRNBQKP1-8]+)\s[bw]\s(-|K?Q?k?q?)\s(-|[a-h][36])\s(0|[1-9][0-9]*)\s([1-9][0-9]*)/;
 
 function sendCmd(cmd: string): Promise<any> {
-    return new Promise((resolve, reject) => {
-        engine.send(cmd, 
+    return new Promise((resolve, _reject) => {
+        engine.send(cmd,
             function onDone(data: any) {
-                // console.log("UCINEWGAME DONE:", data);
                 resolve(data);
-            },  
+            },
             function onStream(data: any) {
-                // console.log("UCINEWGAME STREAMING:", data);
                 // handle streaming data here
             }
         );
     });
 }
 
-// engine.send("ucinewgame", function onDone(data: any){
-//     console.log("UCINEWGAME DONE:", data);
-// },  function onStream(data: any) {
-//     console.log("UCINEWGAME STREAMING:", data);
-// });
-
-// engine.send("isready", function onDone(data: any) {
-//     console.log("ISREADY DONE:", data);
-// }, function onStream(data: any) {
-//     console.log("ISREADY STREAMING:", data);
-// })
-
-// engine.send("position fen rnb1kb1r/pppp2Pp/4p2n/6q1/8/8/PPPP1PPP/RNBQKBNR w KQkq - 1 5", function onDone(data: any) {
-//     console.log("POSITIONFEN DONE:", data);
-// },  function onStream(data: any) {
-//     console.log("POSITIONFEN STREAMING:", data);
-// });
-
-// engine.send("go depth 18", function onDone(data: any){
-//     console.log("GOPDEPTH DONE:", data);
-//     if (typeof data == "string" && data.match("bestmove")) {
-//         const bestmoves = data.split(" ");
-//         console.log(bestmoves);
-//     }
-// },  function onStream(data: any) {
-//     console.log("GODEPTH STREAMING:", data);
-// });
-
 app.use(express.json()) // for parsing application/json
 app.use(express.urlencoded({ extended: true })) // for parsing application/x-www-form-urlencoded
 
-app.get("/", (req, res) => {
+app.get("/", (_req, res) => {
     res.send("ok");
 });
 
 app.post('/', async (req, res) => {
     if (!req.body.fen.match(fenregex)) {
-        console.log(req.body.fen)
+        // console.log(req.body.fen)
         res.send("Invalid fen string");
         return;
     }
@@ -78,7 +62,7 @@ app.post('/', async (req, res) => {
         }
 
         // only send res when it is a recommendation
-        if (typeof(msg == "string") && msg.match("bestmove")) {
+        if (typeof (msg == "string") && msg.match("bestmove")) {
             const bestmoves = msg.split(" ");
             // console.log(bestmoves);
 
@@ -91,10 +75,96 @@ app.post('/', async (req, res) => {
             res.send(move);
         }
     } else {
+        // console.log("CHESS ENGINE BROKE!");
         res.send("Engine is broken");
     }
 });
 
-app.listen(port, () => {
-    console.log(`server is listening on ${port}`)
-})
+wss.on('connection', function (ws) {
+
+    const id = uuidv4();
+
+    // console.log("new conn", id);
+
+    let hasQueue = false;
+
+    wsMap.set(id, ws);
+
+    ws.on('error', console.error);
+
+    ws.on('match', function () {
+        hasQueue = false;
+        ws.send(JSON.stringify({
+            type: "match"
+        }));
+    });
+
+    ws.on('message', function (data) {
+        const ev = JSON.parse(data.toString('utf8'));
+
+        if (ev.type === "queue") {
+            const colorIndex = Number(ev.data.color);
+            // console.log("queue as", colorIndex);
+            // console.log("opp", Math.abs(colorIndex - 1), queue, queue[Math.abs(colorIndex - 1)]);
+            if (queue[Math.abs(colorIndex - 1)].length > 0) {
+                const other = queue[Math.abs(colorIndex - 1)].shift()!;
+
+                connectionMap.set(id, other);
+                connectionMap.set(other, id);
+                ws.send(JSON.stringify({
+                    type: "match"
+                }));
+                // console.log(wsMap.keys(), other);
+                wsMap.get(other)!.emit("match");
+                return;
+            }
+            queue[colorIndex as (0 | 1)].push(id);
+            hasQueue = true;
+        } else if (ev.type === "move") {
+            const opp = connectionMap.get(id)!;
+            // send the 1:1 replica of data
+            wsMap.get(opp)!.send(data);
+        }
+
+        console.log('received: %s', data);
+    });
+
+    ws.on('close', function () {
+        wsMap.delete(id);
+        if (hasQueue) {
+            const index1 = queue[0].indexOf(id);
+            if (index1 > -1) {
+                queue[0].splice(index1, 1);
+            }
+
+            const index2 = queue[1].indexOf(id);
+            if (index2 > -1) {
+                queue[1].splice(index2, 1);
+            }
+        }
+    });
+
+    // this gets sent initially
+    // ws.send('something');
+});
+
+const normalizePath = (path: string) => path.replace(/\/+$/, '');
+
+server.on('upgrade', (request, socket, head) => {
+    const requestUrl = request.url || '/';
+    const pathname = new URL(requestUrl, `http://${request.headers.host}`).pathname;
+
+    const normalizedPath = normalizePath(pathname);
+
+    if (normalizedPath === '/ws') {
+        wss.handleUpgrade(request, socket, head, (ws) => {
+            wss.emit('connection', ws, request);
+        });
+    } else {
+        socket.destroy();
+    }
+});
+
+server.listen(port, () => {
+    console.log(`server is listening on ${port}`);
+});
