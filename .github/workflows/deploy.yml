@@ -35,5 +35,5 @@ jobs:
         uses: denoland/deployctl@v1
         with:
           project: "chesser"
-          entrypoint: "npm start"
+          entrypoint: "server.ts"
           root: ""
