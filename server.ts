@@ -45,7 +45,7 @@ function sendCmd(cmd: string): Promise<any> {
 
 app.use(express.json()) // for parsing application/json
 app.use(express.urlencoded({ extended: true })) // for parsing application/x-www-form-urlencoded
-app.use(cors());
+app.use(cors(corsOptions));
 
 app.get("/", (_req, res) => {
     res.send("ok");
