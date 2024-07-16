@@ -2,6 +2,12 @@ import express from "express";
 import http from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { v4 as uuidv4 } from "uuid";
+import cors from "cors";
+
+const corsOptions = {
+    origin: 'https://chesser.williamzeng.xyz',
+    optionsSuccessStatus: 200 // some legacy browsers (IE11, various SmartTVs) choke on 204
+}
 
 // copy pasted from the stockfish repo
 // issue: <github_link>
@@ -39,6 +45,7 @@ function sendCmd(cmd: string): Promise<any> {
 
 app.use(express.json()) // for parsing application/json
 app.use(express.urlencoded({ extended: true })) // for parsing application/x-www-form-urlencoded
+app.use(cors());
 
 app.get("/", (_req, res) => {
     res.send("ok");
