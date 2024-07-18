@@ -52,7 +52,7 @@ app.get("/", (_req, res) => {
 });
 
 app.post('/', async (req, res) => {
-    if (!req.body.fen.match(fenregex)) {
+    if (!req.body.fen || !req.body.fen.match(fenregex)) {
         // console.log(req.body.fen)
         res.send("Invalid fen string");
         return;
