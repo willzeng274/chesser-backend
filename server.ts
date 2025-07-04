@@ -5,7 +5,10 @@ import { v4 as uuidv4 } from "uuid";
 import cors from "cors";
 
 const corsOptions = {
-    origin: 'https://chesser.williamzeng.xyz',
+    origin: [
+        'https://chesser.williamzeng.xyz',
+        'https://chesser.wzeng.dev'
+    ],
     optionsSuccessStatus: 200 // some legacy browsers (IE11, various SmartTVs) choke on 204
 }
 
